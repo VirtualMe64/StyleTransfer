@@ -17,6 +17,9 @@ def generate_noisy_image(shape):
     im = torch.randint(0, 256, shape).float()
     return im
 
+def compute_gram_matrix(features : torch.Tensor):
+    return torch.einsum('ijk,ljk->il', features, features)
+
 class StyleTranferModel(torch.nn.Module):
     def __init__(self):
         super(StyleTranferModel, self).__init__()
@@ -41,13 +44,28 @@ class StyleTranferModel(torch.nn.Module):
         return features
 
 def content_loss(output, target, layer='conv1_1'):
-    return 0.5 * torch.mean((output[layer] - target[layer]) ** 2)
+    return 0.5 * torch.sum((output[layer] - target[layer]) ** 2)
+
+def style_loss(output, target_grams):
+    total_loss = 0
+    for layer in output.keys():
+        output_gram = compute_gram_matrix(output[layer])
+        err = torch.sum((output_gram - target_grams[layer]) ** 2)
+        err /= 4
+        err /= output[layer].shape[0] ** 2
+        err /= (output[layer].shape[1] * output[layer].shape[2]) ** 2
+        total_loss += 0.2 * err
+    return total_loss
 
 def transfer_style(photo_path, iters = 250):
+    ALPHA = 1
+    BETA = 10
+
     # Load model and images
     m = StyleTranferModel()
     target_im = load_image(photo_path)
     target_features = m.forward(target_im)
+    target_grams = {key : compute_gram_matrix(t) for key, t in target_features.items()}
 
     # Create noisy image which will become style transferred photo
     image = generate_noisy_image(target_im.shape)
@@ -61,8 +79,8 @@ def transfer_style(photo_path, iters = 250):
         
         # forward pass
         output = m.forward(image)
-        loss = content_loss(output, target_features)
-        
+        loss = (ALPHA * content_loss(output, target_features)) + (BETA * style_loss(output, target_grams))
+
         # backward pass
         loss.backward()
         optimizer.step()
