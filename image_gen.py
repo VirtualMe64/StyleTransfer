@@ -30,7 +30,7 @@ def checkpoint(image_tensor, photo_path, painting_path, alpha, beta, iteration):
     save_image(image_tensor, path)
 
 def generate_noisy_image(shape):
-    im = torch.rand(shape).float()
+    im = torch.rand(shape).float() * 0.1
     return im
 
 def compute_gram_matrix(features : torch.Tensor):
@@ -88,30 +88,36 @@ def transfer_style(photo_path, painting_path, alpha = 1, beta = 10, epoch_size =
     image.requires_grad = True
 
     # Create optimizer
-    optimizer = torch.optim.Adam([image], lr = 0.1)
+    optimizer = torch.optim.LBFGS([image], lr = 0.1)
 
-    for i in range(epoch_size * iters):
-        optimizer.zero_grad() # reset grads
-        
-        # forward pass
-        output = m.forward(image)
+    step = [0]
+    while step[0] < epoch_size * iters:
+        def closure():
+            optimizer.zero_grad() # reset grads
+            
+            # forward pass
+            output = m.forward(image)
 
-        c_loss = content_loss(output, target_features)
-        s_loss = style_loss(output, target_grams)
-        loss = (alpha * c_loss) + (beta * s_loss)
+            c_loss = content_loss(output, target_features)
+            s_loss = style_loss(output, target_grams)
+            loss = (alpha * c_loss) + (beta * s_loss)
 
-        # backward pass
-        loss.backward()
-        optimizer.step()
+            # backward pass
+            loss.backward()
 
-        with torch.no_grad():
-            image.data.clamp_(0, 1)
+            with torch.no_grad():
+                image.data.clamp_(0, 1)
 
-        if i % epoch_size == 0:
-            print(f"Iter: {i:05}, Content Loss: {c_loss}, Style Loss: {s_loss}. Saving image...")
-            checkpoint(image, photo_path, painting_path, alpha, beta, i)
+            if step[0] % epoch_size == 0:
+                print(f"Iter: {step[0]:05}, Content Loss: {c_loss}, Style Loss: {s_loss}. Saving image...")
+                checkpoint(image, photo_path, painting_path, alpha, beta, step[0])
+            
+            step[0] += 1
+            return loss
 
-    checkpoint(image, photo_path, painting_path, alpha, beta, i + 1)
+        optimizer.step(closure)
+
+    checkpoint(image, photo_path, painting_path, alpha, beta, step[0] + 1)
     display_image(image)
 
 if __name__ == "__main__":
