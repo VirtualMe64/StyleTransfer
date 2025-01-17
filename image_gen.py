@@ -2,19 +2,35 @@ import torch
 from torchvision.models import vgg19, VGG19_Weights
 from torchvision.models.feature_extraction import create_feature_extractor
 from torchvision.io import read_image
+from torchvision.utils import save_image
 
+import os
 import matplotlib.pyplot as plt
 
-def load_image(path):
-    return read_image(path).float()
+OUTPUT_FOLDER = "output"
 
-def display_image(image_tensor : torch.Tensor):
-    plt.imshow(image_tensor.int().permute(1, 2, 0))
+def load_image(path):
+    return read_image(path).float() / 255
+
+def display_image(image_tensor):
+    plt.imshow(image_tensor.permute(1, 2, 0))
     plt.axis('off')
     plt.show()
 
+def checkpoint(image_tensor, photo_path, painting_path, alpha, beta, iteration):
+    photo_name = os.path.splitext(os.path.basename(photo_path))[0]
+    painting_name = os.path.splitext(os.path.basename(painting_path))[0]
+
+    subfolder = f"{photo_name}-{painting_name}-a{alpha}_b{beta}"
+    folder = os.path.join(OUTPUT_FOLDER, subfolder)
+    path = os.path.join(folder, f"{iteration:05}.jpg")
+
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    save_image(image_tensor, path)
+
 def generate_noisy_image(shape):
-    im = torch.randint(0, 256, shape).float()
+    im = torch.rand(shape).float()
     return im
 
 def compute_gram_matrix(features : torch.Tensor):
@@ -25,7 +41,7 @@ class StyleTranferModel(torch.nn.Module):
         super(StyleTranferModel, self).__init__()
 
         # load model and set to eval mode
-        model = vgg19(weights = VGG19_Weights.IMAGENET1K_V1).features.eval()
+        model = vgg19(weights=VGG19_Weights.IMAGENET1K_V1).features.eval()
         return_nodes = {
             '4': 'conv1_1',
             '9': 'conv2_1',
@@ -43,7 +59,7 @@ class StyleTranferModel(torch.nn.Module):
         features = self.vgg_features_model(x)
         return features
 
-def content_loss(output, target, layer='conv1_1'):
+def content_loss(output, target, layer='conv3_1'):
     return 0.5 * torch.sum((output[layer] - target[layer]) ** 2)
 
 def style_loss(output, target_grams):
@@ -57,10 +73,7 @@ def style_loss(output, target_grams):
         total_loss += 0.2 * err
     return total_loss
 
-def transfer_style(photo_path, painting_path, iters = 250):
-    ALPHA = 1  # content multiplier
-    BETA = 10 # style multipler
-
+def transfer_style(photo_path, painting_path, alpha = 1, beta = 10, epoch_size = 100, iters = 20):
     # Load model and images
     m = StyleTranferModel()
     target_photo = load_image(photo_path)
@@ -74,27 +87,31 @@ def transfer_style(photo_path, painting_path, iters = 250):
     image.requires_grad = True
 
     # Create optimizer
-    optimizer = torch.optim.Adam([image], lr = 1)
+    optimizer = torch.optim.Adam([image], lr = 0.1)
 
-    for i in range(iters):
+    for i in range(epoch_size * iters):
         optimizer.zero_grad() # reset grads
         
         # forward pass
         output = m.forward(image)
-        loss = (ALPHA * content_loss(output, target_features)) + (BETA * style_loss(output, target_grams))
+
+        c_loss = content_loss(output, target_features)
+        s_loss = style_loss(output, target_grams)
+        loss = (alpha * c_loss) + (beta * s_loss)
 
         # backward pass
         loss.backward()
         optimizer.step()
 
         with torch.no_grad():
-            image.data.clamp_(0, 255)
+            image.data.clamp_(0, 1)
 
-        if i % 100 == 0:
-            print(f"Iter: {i:.04}, Loss: {loss}")
-            display_image(image.detach())
+        if i % epoch_size == 0:
+            print(f"Iter: {i:05}, Content Loss: {c_loss}, Style Loss: {s_loss}. Saving image...")
+            checkpoint(image, photo_path, painting_path, alpha, beta, i)
 
+    checkpoint(image, photo_path, painting_path, alpha, beta, i + 1)
     display_image(image)
 
 if __name__ == "__main__":
-    transfer_style("photos/neckarfront.jpg", "paintings/starry_night.jpg", iters = 1000)
+    transfer_style("photos/neckarfront.jpg", "paintings/starry_night.jpg", iters = 100, alpha = 1, beta = 1000)
