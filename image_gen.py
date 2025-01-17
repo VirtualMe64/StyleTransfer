@@ -57,18 +57,20 @@ def style_loss(output, target_grams):
         total_loss += 0.2 * err
     return total_loss
 
-def transfer_style(photo_path, iters = 250):
-    ALPHA = 1
-    BETA = 10
+def transfer_style(photo_path, painting_path, iters = 250):
+    ALPHA = 1  # content multiplier
+    BETA = 10 # style multipler
 
     # Load model and images
     m = StyleTranferModel()
-    target_im = load_image(photo_path)
-    target_features = m.forward(target_im)
-    target_grams = {key : compute_gram_matrix(t) for key, t in target_features.items()}
+    target_photo = load_image(photo_path)
+    target_features = m.forward(target_photo)
+
+    target_painting = load_image(painting_path)
+    target_grams = {key : compute_gram_matrix(t) for key, t in m.forward(target_painting).items()}
 
     # Create noisy image which will become style transferred photo
-    image = generate_noisy_image(target_im.shape)
+    image = generate_noisy_image(target_photo.shape)
     image.requires_grad = True
 
     # Create optimizer
@@ -88,11 +90,11 @@ def transfer_style(photo_path, iters = 250):
         with torch.no_grad():
             image.data.clamp_(0, 255)
 
-        if i % 50 == 0:
-            print(f"Iter: {i}, Loss: {loss}")
+        if i % 100 == 0:
+            print(f"Iter: {i:.04}, Loss: {loss}")
             display_image(image.detach())
 
     display_image(image)
 
 if __name__ == "__main__":
-    transfer_style("photos/neckarfront.jpg", iters = 1000)
+    transfer_style("photos/neckarfront.jpg", "paintings/starry_night.jpg", iters = 1000)
