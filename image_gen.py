@@ -30,7 +30,7 @@ def checkpoint(image_tensor, photo_path, painting_path, alpha, beta, iteration):
     save_image(image_tensor, path)
 
 def generate_noisy_image(shape):
-    im = torch.rand(shape).float() * 0.1
+    im = torch.rand(shape).float()
     return im
 
 def compute_gram_matrix(features : torch.Tensor):
@@ -74,24 +74,33 @@ def style_loss(output, target_grams, style_layers = ['conv1_1', 'conv2_1', 'conv
         total_loss += err / len(style_layers)
     return total_loss
 
-def transfer_style(photo_path, painting_path, alpha = 1, beta = 10, epoch_size = 100, iters = 20):
+def transfer_style(photo_path, painting_path, alpha = 1, beta = 10, epoch_size = 100, iters = 20, start_noise = True, checkpoint_path = None):
     # Load model and images
     m = StyleTranferModel()
-    target_photo = load_image(photo_path)
+    target_photo = load_image(photo_path).contiguous()
     target_features = m.forward(target_photo)
 
     target_painting = load_image(painting_path)
     target_grams = {key : compute_gram_matrix(t) for key, t in m.forward(target_painting).items()}
 
     # Create noisy image which will become style transferred photo
-    image = generate_noisy_image(target_photo.shape)
-    image.requires_grad = True
+    if checkpoint_path is None:
+        if start_noise:
+            image = generate_noisy_image(target_photo.shape)
+        else:
+            image = target_photo.detach().clone()
+        image.requires_grad = True
+        curr_iter = 0
+    else:
+        image = load_image(checkpoint_path)
+        image.requires_grad = True
+        curr_iter = int(os.path.splitext(os.path.basename(checkpoint_path))[0])
 
     # Create optimizer
-    optimizer = torch.optim.LBFGS([image], lr = 0.1)
+    optimizer = torch.optim.LBFGS([image])
 
-    step = [0]
-    while step[0] < epoch_size * iters:
+    step = [curr_iter]
+    while step[0] < (epoch_size * iters) + curr_iter:
         def closure():
             optimizer.zero_grad() # reset grads
             
@@ -109,7 +118,7 @@ def transfer_style(photo_path, painting_path, alpha = 1, beta = 10, epoch_size =
                 image.data.clamp_(0, 1)
 
             if step[0] % epoch_size == 0:
-                print(f"Iter: {step[0]:05}, Content Loss: {c_loss}, Style Loss: {s_loss}. Saving image...")
+                print(f"Iter: {step[0]:05}, Content Loss: {alpha * c_loss}, Style Loss: {beta * s_loss}. Saving image...")
                 checkpoint(image, photo_path, painting_path, alpha, beta, step[0])
             
             step[0] += 1
@@ -121,4 +130,4 @@ def transfer_style(photo_path, painting_path, alpha = 1, beta = 10, epoch_size =
     display_image(image)
 
 if __name__ == "__main__":
-    transfer_style("photos/neckarfront.jpg", "paintings/starry_night.jpg", iters = 100, alpha = 1, beta = 1000)
+    transfer_style("photos/neckarfront.jpg", "paintings/starry_night.jpg", iters = 100, alpha = 1, beta = 1e7, start_noise=False)
