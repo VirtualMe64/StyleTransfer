@@ -47,6 +47,7 @@ class StyleTranferModel(torch.nn.Module):
             '9': 'conv2_1',
             '16': 'conv3_1',
             '23': 'conv4_1',
+            '24': 'conv4_2',
             '30': 'conv5_1'
         }
         self.vgg_features_model = create_feature_extractor(model, return_nodes=return_nodes)
@@ -59,18 +60,18 @@ class StyleTranferModel(torch.nn.Module):
         features = self.vgg_features_model(x)
         return features
 
-def content_loss(output, target, layer='conv3_1'):
+def content_loss(output, target, layer='conv4_2'):
     return 0.5 * torch.sum((output[layer] - target[layer]) ** 2)
 
-def style_loss(output, target_grams):
+def style_loss(output, target_grams, style_layers = ['conv1_1', 'conv2_1', 'conv3_1', 'conv4_1', 'conv5_1']):
     total_loss = 0
-    for layer in output.keys():
+    for layer in style_layers:
         output_gram = compute_gram_matrix(output[layer])
         err = torch.sum((output_gram - target_grams[layer]) ** 2)
         err /= 4
         err /= output[layer].shape[0] ** 2
         err /= (output[layer].shape[1] * output[layer].shape[2]) ** 2
-        total_loss += 0.2 * err
+        total_loss += err / len(style_layers)
     return total_loss
 
 def transfer_style(photo_path, painting_path, alpha = 1, beta = 10, epoch_size = 100, iters = 20):
